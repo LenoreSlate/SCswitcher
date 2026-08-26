@@ -6,9 +6,7 @@
   "permissions": [
     "cookies",
     "storage",
-    "tabs",
-    "scripting",
-    "webNavigation"
+    "tabs"
   ],
   "host_permissions": [
     "*://*.soundcloud.com/*"

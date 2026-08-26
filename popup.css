@@ -145,7 +145,11 @@ input[type="text"]:focus {
 }
 
 .status-msg.success {
-  color: #a1a1aa;
+  color: #4ade80;
+}
+
+.status-msg.info {
+  color: #38bdf8;
 }
 
 .status-msg.error {
