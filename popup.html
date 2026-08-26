@@ -3,31 +3,40 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SoundCloud Switcher</title>
+  <title>SoundCloud Switcher Pro</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="header">
+  <!-- Header -->
+  <header class="header">
     <div class="brand">
-      <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95C8.08 7.14 9.94 6 12 6c2.62 0 4.88 1.86 5.39 4.43l.3 1.5 1.53.11c1.56.1 2.78 1.41 2.78 2.96 0 1.65-1.35 3-3 3z"/>
-      </svg>
-      <span class="brand-title">SoundCloud Switcher</span>
+      <div class="brand-logo-wrap">
+        <svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95C8.08 7.14 9.94 6 12 6c2.62 0 4.88 1.86 5.39 4.43l.3 1.5 1.53.11c1.56.1 2.78 1.41 2.78 2.96 0 1.65-1.35 3-3 3z"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="brand-title">SC Switcher</h1>
+        <span class="brand-subtitle">Gestionnaire multi-comptes</span>
+      </div>
     </div>
-  </div>
+  </header>
 
-  <div class="content">
+  <!-- Main Content -->
+  <main class="content">
+    <!-- Section d'enregistrement -->
     <div class="section-card">
       <div class="input-container">
-        <input type="text" id="accountName" placeholder="Nom du compte..." spellcheck="false" autocomplete="off">
-        <button id="saveBtn" class="btn btn-primary">Enregistrer</button>
+        <input type="text" id="accountName" placeholder="Nom du compte (ou auto)..." spellcheck="false" autocomplete="off" maxlength="50">
+        <button id="saveBtn" class="btn btn-primary" title="Enregistrer la session active">Enregistrer</button>
       </div>
-      <p id="saveStatus" class="status-msg"></p>
+      <p id="saveStatus" class="status-msg" role="status" aria-live="polite"></p>
     </div>
 
+    <!-- Liste des comptes -->
     <div class="accounts-container">
       <div class="section-header">
-        <span class="section-title">Comptes</span>
+        <span class="section-title">Comptes enregistrés</span>
         <span id="accountCount" class="count-badge">0</span>
       </div>
 
@@ -37,12 +46,30 @@
         </div>
       </div>
     </div>
-  </div>
+  </main>
 
-  <div class="footer">
-    <button id="cleanLogoutBtn" class="btn btn-secondary">Déconnexion</button>
-    <button id="openSoundcloudBtn" class="btn btn-secondary">SoundCloud</button>
-  </div>
+  <!-- Footer avec actions de session & backup -->
+  <footer class="footer">
+    <div class="footer-row">
+      <button id="cleanLogoutBtn" class="btn btn-secondary" title="Déconnecter la session active">Déconnexion</button>
+      <button id="openSoundcloudBtn" class="btn btn-secondary" title="Ouvrir SoundCloud">SoundCloud</button>
+    </div>
+    <div class="footer-subrow">
+      <button id="exportBtn" class="btn-text" title="Exporter une sauvegarde JSON de vos profils">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m14-7-5-5-5 5m5-5v12"/>
+        </svg>
+        Exporter
+      </button>
+      <button id="importBtn" class="btn-text" title="Restaurer des profils depuis un fichier JSON">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-5 5 5 5-5m-5 5V3"/>
+        </svg>
+        Importer
+      </button>
+      <input type="file" id="importFileInput" accept=".json" style="display: none;">
+    </div>
+  </footer>
 
   <script src="popup.js"></script>
 </body>

@@ -1,9 +1,24 @@
-const SOUNDCLOUD_DOMAINS = ["soundcloud.com", ".soundcloud.com", "api.soundcloud.com", "api-v2.soundcloud.com", "m.soundcloud.com"];
+const SOUNDCLOUD_DOMAINS = [
+  "soundcloud.com",
+  ".soundcloud.com",
+  "api.soundcloud.com",
+  "api-v2.soundcloud.com",
+  "m.soundcloud.com"
+];
 
-// Flag pour éviter les boucles d'auto-sauvegarde pendant les transactions de switch/logout
+// Verrou pour éviter les boucles d'auto-sauvegarde pendant les transactions
 let isSwitching = false;
 
-// 1. Écouteur de messages venant de la popup UI
+// Initialisation au démarrage
+chrome.runtime.onInstalled.addListener(() => {
+  updateExtensionBadge();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  updateExtensionBadge();
+});
+
+// 1. ÉCOUTEUR DE MESSAGES POPUP
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "SWITCH_ACCOUNT") {
     handleSwitchAccount(request.accountName).then(() => {
@@ -40,12 +55,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   }
+
+  if (request.action === "IMPORT_ACCOUNTS") {
+    handleImportAccounts(request.accounts).then((res) => {
+      sendResponse(res);
+    }).catch((err) => {
+      sendResponse({ success: false, error: err.message || err.toString() });
+    });
+    return true;
+  }
+
+  if (request.action === "GET_CURRENT_SC_PROFILE") {
+    detectCurrentProfile().then((res) => {
+      sendResponse(res);
+    }).catch((err) => {
+      sendResponse({ success: false, error: err.message || err.toString() });
+    });
+    return true;
+  }
 });
 
 // 2. AUTO-SYNC EN TEMPS RÉEL
-// Dès qu'un cookie SoundCloud est mis à jour / renouvelé par le site, on met à jour la sauvegarde du compte actif
 chrome.cookies.onChanged.addListener((changeInfo) => {
-  if (isSwitching) return; // Ne pas interférer pendant un switch ou logout
+  if (isSwitching) return;
 
   const domain = changeInfo.cookie?.domain || "";
   if (!SOUNDCLOUD_DOMAINS.some(d => domain.includes("soundcloud.com"))) return;
@@ -67,7 +99,6 @@ function debouncedSyncActiveAccount() {
 
       if (activeName && accounts[activeName]) {
         const freshCookies = await getSoundcloudCookies();
-        // Vérification de sécurité : ne synchroniser que si la session active est authentifiée
         if (hasSoundcloudAuthCookie(freshCookies)) {
           accounts[activeName].cookies = freshCookies;
           accounts[activeName].lastSynced = new Date().toISOString();
@@ -77,16 +108,73 @@ function debouncedSyncActiveAccount() {
     } catch (e) {
       console.warn("Auto-sync background error:", e);
     }
-  }, 1000);
+  }, 1200);
 }
 
-// Vérifie si les cookies contiennent un jeton d'authentification SoundCloud valide
+// 3. RÉCUPÉRATION DU PROFIL SOUNDCLOUD VIA API
+async function fetchSoundcloudUserProfile(oauthToken) {
+  if (!oauthToken) return null;
+  try {
+    const response = await fetch("https://api-v2.soundcloud.com/me", {
+      headers: {
+        "Authorization": `OAuth ${oauthToken}`,
+        "Accept": "application/json"
+      }
+    });
+    if (response.ok) {
+      const user = await response.json();
+      return {
+        username: user.username || user.permalink || "",
+        avatarUrl: user.avatar_url || "",
+        permalinkUrl: user.permalink_url || `https://soundcloud.com/${user.permalink}`,
+        followersCount: user.followers_count || 0
+      };
+    }
+  } catch (e) {
+    console.warn("SoundCloud Profile Fetch error:", e);
+  }
+  return null;
+}
+
+// Détection du profil actif actuellement dans le navigateur
+async function detectCurrentProfile() {
+  const cookies = await getSoundcloudCookies();
+  const oauthCookie = cookies.find(c => c.name === "oauth_token" && c.value);
+  if (!oauthCookie) {
+    return { success: false, authenticated: false };
+  }
+
+  const profile = await fetchSoundcloudUserProfile(oauthCookie.value);
+  return {
+    success: true,
+    authenticated: true,
+    profile: profile
+  };
+}
+
+// 4. GESTION DES BADGES D'ICÔNE CHROME
+async function updateExtensionBadge() {
+  try {
+    const data = await chrome.storage.local.get(["sc_active_account"]);
+    const active = data.sc_active_account;
+    if (active) {
+      const badgeText = active.trim().substring(0, 3).toUpperCase();
+      await chrome.action.setBadgeText({ text: badgeText });
+      await chrome.action.setBadgeBackgroundColor({ color: "#ff5500" });
+    } else {
+      await chrome.action.setBadgeText({ text: "" });
+    }
+  } catch (e) {
+    console.warn("Badge update error:", e);
+  }
+}
+
+// 5. GESTION DES COOKIES
 function hasSoundcloudAuthCookie(cookies) {
   if (!Array.isArray(cookies) || cookies.length === 0) return false;
   return cookies.some(c => c.name === "oauth_token" && typeof c.value === "string" && c.value.trim().length > 0);
 }
 
-// Récupère tous les cookies SoundCloud
 async function getSoundcloudCookies() {
   const allCookies = [];
   for (const domain of SOUNDCLOUD_DOMAINS) {
@@ -104,7 +192,6 @@ async function getSoundcloudCookies() {
   return allCookies;
 }
 
-// Supprime tous les cookies SoundCloud
 async function clearSoundcloudCookies() {
   const cookies = await getSoundcloudCookies();
   for (const cookie of cookies) {
@@ -123,7 +210,6 @@ async function clearSoundcloudCookies() {
   }
 }
 
-// Applique une liste de cookies en respectant les attributs stricts (hostOnly, sameSite, storeId)
 async function setSoundcloudCookies(cookies) {
   for (const cookie of cookies) {
     const cleanDomain = cookie.domain.startsWith(".") ? cookie.domain.substring(1) : cookie.domain;
@@ -139,7 +225,6 @@ async function setSoundcloudCookies(cookies) {
       httpOnly: Boolean(cookie.httpOnly)
     };
 
-    // Si le cookie est host-only, ne pas spécifier 'domain' pour que Chrome l'associe strictement à l'host de l'URL
     if (!cookie.hostOnly && cookie.domain) {
       cookieDetails.domain = cookie.domain;
     }
@@ -159,31 +244,43 @@ async function setSoundcloudCookies(cookies) {
     try {
       await chrome.cookies.set(cookieDetails);
     } catch (e) {
-      console.warn(`Erreur réinjection cookie ${cookie.name}:`, e);
+      console.warn(`Erreur injection cookie ${cookie.name}:`, e);
     }
   }
 }
 
-// Sauvegarde d'un profil avec validation préalable d'authentification
-async function handleManualSave(name) {
-  const cleanName = (name || "").trim();
-  if (!cleanName) {
-    return { success: false, error: "Le nom du compte est requis." };
-  }
+// 6. ACTIONS MÉTIER
 
+// Sauvegarde manuelle ou auto-détectée d'un profil
+async function handleManualSave(preferredName) {
   const cookies = await getSoundcloudCookies();
   if (!hasSoundcloudAuthCookie(cookies)) {
     return { 
       success: false, 
-      error: "Aucune session active détectée sur SoundCloud. Veuillez vous connecter d'abord." 
+      error: "Aucune session active détectée. Connectez-vous d'abord sur SoundCloud." 
     };
+  }
+
+  const oauthCookie = cookies.find(c => c.name === "oauth_token");
+  const profile = await fetchSoundcloudUserProfile(oauthCookie?.value);
+
+  // Nom final : nom spécifié par l'utilisateur ou nom SoundCloud détecté
+  let finalName = (preferredName || "").trim();
+  if (!finalName && profile && profile.username) {
+    finalName = profile.username;
+  }
+  if (!finalName) {
+    finalName = "Compte SoundCloud";
   }
 
   const data = await chrome.storage.local.get(["sc_accounts"]);
   const accounts = data.sc_accounts || {};
 
-  accounts[cleanName] = {
-    name: cleanName,
+  accounts[finalName] = {
+    name: finalName,
+    username: profile?.username || finalName,
+    avatarUrl: profile?.avatarUrl || null,
+    permalinkUrl: profile?.permalinkUrl || null,
     cookies: cookies,
     savedAt: new Date().toISOString(),
     lastSynced: new Date().toISOString()
@@ -191,18 +288,17 @@ async function handleManualSave(name) {
 
   await chrome.storage.local.set({
     sc_accounts: accounts,
-    sc_active_account: cleanName
+    sc_active_account: finalName
   });
 
-  return { success: true };
+  await updateExtensionBadge();
+  return { success: true, name: finalName, profile: profile };
 }
 
-// Suppression sécurisée d'un profil
+// Suppression d'un compte
 async function handleDeleteAccount(name) {
   const cleanName = (name || "").trim();
-  if (!cleanName) {
-    return { success: false, error: "Nom invalide." };
-  }
+  if (!cleanName) return { success: false, error: "Nom invalide." };
 
   const data = await chrome.storage.local.get(["sc_accounts", "sc_active_account"]);
   const accounts = data.sc_accounts || {};
@@ -214,10 +310,37 @@ async function handleDeleteAccount(name) {
   }
 
   await chrome.storage.local.set(updates);
+  await updateExtensionBadge();
   return { success: true };
 }
 
-// Bascule de compte avec verrouillage anti-concurrence et rechargement propre
+// Importation de comptes sauvegardés
+async function handleImportAccounts(importedAccounts) {
+  if (!importedAccounts || typeof importedAccounts !== "object") {
+    return { success: false, error: "Format de fichier invalide." };
+  }
+
+  const data = await chrome.storage.local.get(["sc_accounts"]);
+  const existing = data.sc_accounts || {};
+
+  let count = 0;
+  for (const [key, acc] of Object.entries(importedAccounts)) {
+    if (acc && acc.name && Array.isArray(acc.cookies) && hasSoundcloudAuthCookie(acc.cookies)) {
+      existing[acc.name] = acc;
+      count++;
+    }
+  }
+
+  if (count === 0) {
+    return { success: false, error: "Aucun profil valide trouvé dans le fichier importé." };
+  }
+
+  await chrome.storage.local.set({ sc_accounts: existing });
+  await updateExtensionBadge();
+  return { success: true, count: count };
+}
+
+// Bascule de compte avec actualisation cohérente des onglets SoundCloud
 async function handleSwitchAccount(targetName) {
   isSwitching = true;
 
@@ -226,7 +349,7 @@ async function handleSwitchAccount(targetName) {
     const accounts = data.sc_accounts || {};
     const currentActive = data.sc_active_account;
 
-    // 1. Sauvegarder d'abord les cookies frais du compte actuel si connecté
+    // Sauvegarder les cookies frais du compte actuel si connecté
     if (currentActive && accounts[currentActive]) {
       const currentCookies = await getSoundcloudCookies();
       if (hasSoundcloudAuthCookie(currentCookies)) {
@@ -240,30 +363,38 @@ async function handleSwitchAccount(targetName) {
       throw new Error(`Le compte "${targetName}" est introuvable.`);
     }
 
-    // 2. Vider les cookies existants
+    // 1. Vider les cookies existants
     await clearSoundcloudCookies();
 
-    // 3. Injecter les cookies du nouveau compte
+    // 2. Injecter les cookies du nouveau profil
     await setSoundcloudCookies(targetAccount.cookies);
 
-    // 4. Mettre à jour le compte actif en mémoire
+    // 3. Mettre à jour le compte actif
     await chrome.storage.local.set({
       sc_accounts: accounts,
       sc_active_account: targetName
     });
 
-    // 5. Mettre au premier plan ou ouvrir l'onglet SoundCloud
+    await updateExtensionBadge();
+
+    // 4. Synchroniser tous les onglets SoundCloud ouverts
     const tabs = await chrome.tabs.query({ url: "*://*.soundcloud.com/*" });
     if (tabs.length > 0) {
-      await chrome.tabs.update(tabs[0].id, { url: "https://soundcloud.com/discover", active: true });
-      if (tabs[0].windowId) {
-        await chrome.windows.update(tabs[0].windowId, { focused: true });
+      const primaryTab = tabs[0];
+      await chrome.tabs.update(primaryTab.id, { url: "https://soundcloud.com/discover", active: true });
+      if (primaryTab.windowId) {
+        await chrome.windows.update(primaryTab.windowId, { focused: true });
+      }
+      // Recharger les éventuels autres onglets SoundCloud pour rafraîchir leur session
+      for (let i = 1; i < tabs.length; i++) {
+        try {
+          await chrome.tabs.reload(tabs[i].id);
+        } catch (e) {}
       }
     } else {
       await chrome.tabs.create({ url: "https://soundcloud.com/discover", active: true });
     }
   } finally {
-    // Relâcher le verrou après 1.5s (temps nécessaire pour que la page charge et initialise les cookies)
     setTimeout(() => {
       isSwitching = false;
     }, 1500);
@@ -276,6 +407,7 @@ async function handleCleanLogout() {
   try {
     await clearSoundcloudCookies();
     await chrome.storage.local.remove(["sc_active_account"]);
+    await updateExtensionBadge();
 
     const tabs = await chrome.tabs.query({ url: "*://*.soundcloud.com/*" });
     if (tabs.length > 0) {
